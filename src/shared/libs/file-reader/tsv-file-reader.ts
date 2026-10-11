@@ -1,110 +1,62 @@
-import { readFileSync } from 'node:fs';
-import type { FileReader } from './file-reader.interface.js';
-import { AMENITIES, CITIES, HOUSING_TYPES, USER_TYPES } from '../../types/index.js';
-import type { Offer } from '../../types/index.js';
+import {EventEmitter} from 'node:events';
+import {createReadStream} from 'node:fs';
+import type {FileReader} from './file-reader.interface.js';
 
-export class TSVFileReader implements FileReader {
-  private rawData: string | null = null;
+const CHUNK_SIZE = 16384;
 
-  constructor(
-    private readonly filename: string
-  ) {}
-
-  public read(): void {
-    this.rawData = readFileSync(this.filename, { encoding: 'utf-8' });
+export class TSVFileReader extends EventEmitter implements FileReader {
+  constructor(private readonly filename: string) {
+    super();
   }
 
-  private parseNumber(value: string, field: string): number {
-    const parsedValue = Number(value);
-
-    if (value === '' || !Number.isFinite(parsedValue)) {
-      throw new Error(`Invalid number for ${field}: ${value}`);
-    }
-
-    return parsedValue;
+  private async emitLine(line: string, lineNumber: number): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      if (!this.emit('line', line, lineNumber, resolve, reject)) {
+        resolve();
+      }
+    });
   }
 
-  private parseBoolean(value: string, field: string): boolean {
-    if (value !== 'true' && value !== 'false') {
-      throw new Error(`Invalid boolean for ${field}: ${value}`);
-    }
+  public async read(): Promise<void> {
+    const stream = createReadStream(this.filename, {
+      highWaterMark: CHUNK_SIZE,
+      encoding: 'utf-8',
+    });
+    let remainingData = '';
+    let lineNumber = 0;
+    let importedRowCount = 0;
 
-    return value === 'true';
-  }
+    const processLine = async (line: string): Promise<void> => {
+      lineNumber++;
 
-  private parseEnum<T extends string>(value: string, allowedValues: readonly T[], field: string): T {
-    const parsedValue = allowedValues.find((item) => item === value);
+      if (!line.trim()) {
+        return;
+      }
 
-    if (parsedValue === undefined) {
-      throw new Error(`Invalid value for ${field}: ${value}`);
-    }
+      await this.emitLine(line.replace(/\r$/, ''), lineNumber);
+      importedRowCount++;
+    };
 
-    return parsedValue;
-  }
+    try {
+      for await (const chunk of stream) {
+        remainingData += chunk.toString();
+        let nextLinePosition = remainingData.indexOf('\n');
 
-  public toArray(): Offer[] {
-    if (this.rawData === null) {
-      throw new Error('File was not read');
-    }
-
-    return this.rawData
-      .split(/\r?\n/)
-      .filter((row) => row.trim().length > 0)
-      .map((line): Offer => {
-        const columns = line.split('\t').map((value) => value.trim());
-
-        if (columns.length !== 22) {
-          throw new Error('Each offer must contain 22 columns.');
+        while (nextLinePosition >= 0) {
+          const line = remainingData.slice(0, nextLinePosition);
+          remainingData = remainingData.slice(nextLinePosition + 1);
+          await processLine(line);
+          nextLinePosition = remainingData.indexOf('\n');
         }
+      }
 
-        const [
-          title, description, date, city, previewImage, images,
-          isPremium, isFavorite, rating, housingType, bedrooms, maxAdults,
-          price, amenities, name, email, avatarPath, password,
-          userType, commentCount, latitude, longitude,
-        ] = columns;
+      if (remainingData.length > 0) {
+        await processLine(remainingData);
+      }
 
-        const postDate = new Date(date);
-
-        if (Number.isNaN(postDate.getTime())) {
-          throw new Error(`Invalid publication date: ${date}`);
-        }
-
-        const photoPaths = images.split(';').map((image) => image.trim());
-
-        if (photoPaths.length !== 6 || photoPaths.some((image) => image === '')) {
-          throw new Error('Each offer must contain exactly 6 images.');
-        }
-
-        return {
-          title,
-          description,
-          postDate,
-          city: this.parseEnum(city, CITIES, 'city'),
-          previewImage,
-          images: photoPaths,
-          isPremium: this.parseBoolean(isPremium, 'isPremium'),
-          isFavorite: this.parseBoolean(isFavorite, 'isFavorite'),
-          rating: this.parseNumber(rating, 'rating'),
-          type: this.parseEnum(housingType, HOUSING_TYPES, 'housing type'),
-          bedrooms: this.parseNumber(bedrooms, 'bedrooms'),
-          maxAdults: this.parseNumber(maxAdults, 'maxAdults'),
-          price: this.parseNumber(price, 'price'),
-          amenities: amenities.split(';')
-            .map((amenity) => this.parseEnum(amenity.trim(), AMENITIES, 'amenity')),
-          user: {
-            name,
-            email,
-            avatarPath: avatarPath || undefined,
-            password,
-            type: this.parseEnum(userType, USER_TYPES, 'user type'),
-          },
-          commentCount: this.parseNumber(commentCount, 'commentCount'),
-          location: {
-            latitude: this.parseNumber(latitude, 'latitude'),
-            longitude: this.parseNumber(longitude, 'longitude'),
-          },
-        };
-      });
+      this.emit('end', importedRowCount);
+    } finally {
+      stream.destroy();
+    }
   }
 }
