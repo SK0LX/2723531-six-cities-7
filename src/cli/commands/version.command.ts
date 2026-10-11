@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import {CommandInterface} from './command.interface';
+import type {CommandInterface} from './command.interface.js';
 import chalk from 'chalk';
 
 type PackageJSONConfig = {

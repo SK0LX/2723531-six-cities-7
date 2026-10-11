@@ -1,4 +1,4 @@
-import {CommandInterface} from './commands/command.interface';
+import type {CommandInterface} from './commands/command.interface.js';
 import {CommandParser} from './command-parser.js';
 export * from './commands/import.command.js';
 
@@ -21,12 +21,12 @@ export class CLIApplication {
     return this.commands[commandName] ?? this.getDefaultCommand();
   }
 
-  public provideCommand(argv: string[]): void {
+  public async provideCommand(argv: string[]): Promise<void> {
     const parsedCommand = CommandParser.parse(argv);
     const [commandName] = Object.keys(parsedCommand);
     const command = this.getCommand(commandName);
     const commandArguments = parsedCommand[commandName] ?? [];
-    command.execute(...commandArguments);
+    await command.execute(...commandArguments);
   }
 
   public getDefaultCommand(): CommandInterface | never {

@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-import { CLIApplication, HelpCommand, ImportCommand, VersionCommand } from './cli/index.js';
+import { CLIApplication, GenerateCommand, HelpCommand, ImportCommand, VersionCommand } from './cli/index.js';
 
-function bootstrap() {
+async function bootstrap(): Promise<void> {
   const cliApplication = new CLIApplication();
   cliApplication.registerCommand([
     new HelpCommand(),
     new VersionCommand(),
-    new ImportCommand()
+    new ImportCommand(),
+    new GenerateCommand()
   ]);
 
-  cliApplication.provideCommand(process.argv);
+  await cliApplication.provideCommand(process.argv);
 }
 
-bootstrap();
+await bootstrap();
