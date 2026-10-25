@@ -14,7 +14,7 @@ export class RestConfig implements Config<RestSchema> {
     const parsedOutput = dotenv.config({quiet: true});
 
     if (parsedOutput.error) {
-      throw new Error('Не удалось прочитать файл .env.');
+      throw new Error('Не удалось загрузить конфигурацию приложения.');
     }
 
     configRestSchema.load({});
@@ -24,7 +24,7 @@ export class RestConfig implements Config<RestSchema> {
     });
 
     this.config = configRestSchema.getProperties();
-    this.logger.info('Файл .env прочитан, конфигурация проверена.');
+    this.logger.info(`Конфигурация проверена: параметров=${Object.keys(this.config).length}.`);
   }
 
   public get<T extends keyof RestSchema>(key: T): RestSchema[T] {
