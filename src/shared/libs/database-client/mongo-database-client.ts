@@ -22,7 +22,8 @@ export class MongoDatabaseClient implements DatabaseClient {
 
     this.connection = await mongoose.connect(uri);
 
-    this.logger.info('Соединение с MongoDB установлено.');
+    const {port, name} = this.connection.connection;
+    this.logger.info(`Соединение с MongoDB установлено: port=${port}, database=${name}.`);
   }
 
   public async disconnect(): Promise<void> {
@@ -30,9 +31,10 @@ export class MongoDatabaseClient implements DatabaseClient {
       throw new Error('Соединение с MongoDB не установлено.');
     }
 
+    const {port, name} = this.connection.connection;
     await this.connection.disconnect();
     this.connection = null;
 
-    this.logger.info('Соединение с MongoDB закрыто.');
+    this.logger.info(`Соединение с MongoDB закрыто: port=${port}, database=${name}.`);
   }
 }
