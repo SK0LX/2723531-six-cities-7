@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 import {inject, injectable} from 'inversify';
 import type {Logger} from '../shared/logger/index.js';
 import type {Config, RestSchema} from '../shared/libs/config/index.js';
@@ -7,6 +8,7 @@ import {getMongoURI} from '../shared/helpers/index.js';
 import express from 'express';
 import type {Express} from 'express';
 import type {Controller, ExceptionFilter} from '../shared/libs/rest/index.js';
+import {AVATAR_URL_PATH, DEFAULT_AVATAR_FILENAME} from '../shared/modules/user/user.constant.js';
 
 @injectable()
 export class RestApplication {
@@ -18,6 +20,7 @@ export class RestApplication {
     @inject(Component.ExceptionFilter) private readonly exceptionFilter: ExceptionFilter,
     @inject(Component.UserController) private readonly userController: Controller,
     @inject(Component.OfferController) private readonly offerController: Controller,
+    @inject(Component.CommentController) private readonly commentController: Controller,
   ) {
     this.server = express();
   }
@@ -43,11 +46,19 @@ export class RestApplication {
 
   private initMiddleware(): void {
     this.server.use(express.json());
+    this.server.get(`${AVATAR_URL_PATH}/${DEFAULT_AVATAR_FILENAME}`, (_req, res) => {
+      res.sendFile(fileURLToPath(new URL('../../markup/img/avatar.svg', import.meta.url)));
+    });
+    this.server.use(AVATAR_URL_PATH, express.static(this.config.get('UPLOAD_DIRECTORY'), {
+      index: false,
+      setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+    }));
   }
 
   private initControllers(): void {
     this.server.use('/users', this.userController.router);
     this.server.use('/offers', this.offerController.router);
+    this.server.use('/offers', this.commentController.router);
   }
 
   private initExceptionFilters(): void {

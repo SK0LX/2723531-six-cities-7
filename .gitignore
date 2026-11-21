@@ -13,3 +13,4 @@ coverage
 
 *.tsv
 !/mocks/test.tsv
+/uploads/

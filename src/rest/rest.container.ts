@@ -8,6 +8,7 @@ import {AppExceptionFilter} from '../shared/libs/rest/index.js';
 import type {Controller, ExceptionFilter} from '../shared/libs/rest/index.js';
 import {OfferController} from '../shared/modules/offer/offer.controller.js';
 import {UserController} from '../shared/modules/user/user.controller.js';
+import {CommentController} from '../shared/modules/comment/comment.controller.js';
 
 export function createRestApplicationContainer(): Container {
   const container = createContainer();
@@ -19,8 +20,7 @@ export function createRestApplicationContainer(): Container {
     .to(AppExceptionFilter)
     .inSingletonScope();
   container.bind<Controller>(Component.UserController).to(UserController).inSingletonScope();
-
   container.bind<Controller>(Component.OfferController).to(OfferController).inSingletonScope();
-
+  container.bind<Controller>(Component.CommentController).to(CommentController).inSingletonScope();
   return container;
 }

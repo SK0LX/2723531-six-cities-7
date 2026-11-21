@@ -1,7 +1,10 @@
+import {randomUUID} from 'node:crypto';
+import {mkdir, open, rm} from 'node:fs/promises';
+import {extname, join} from 'node:path';
 import {inject, injectable} from 'inversify';
 import {StatusCodes} from 'http-status-codes';
 import type {Request, Response} from 'express';
-import {BaseController, HttpError} from '../../libs/rest/index.js';
+import {BaseController, HttpError, ValidateDtoMiddleware, ValidateObjectIdMiddleware} from '../../libs/rest/index.js';
 import {getUserId} from '../../libs/rest/helpers/request-user.js';
 import type {Logger} from '../../logger/index.js';
 import type {Config, RestSchema} from '../../libs/config/index.js';
@@ -11,6 +14,10 @@ import type {UserService} from './user-service.interface.js';
 import type {CreateUserRequest} from './create-user-request.type.js';
 import type {LoginUserRequest} from './login-user-request.type.js';
 import {UserRdo} from './rdo/user.rdo.js';
+import {CreateUserDto} from './dto/create-user.dto.js';
+import {LoginUserDto} from './dto/login-user.dto.js';
+import {UploadAvatarMiddleware} from './upload-avatar.middleware.js';
+import {AVATAR_URL_PATH, DEFAULT_AVATAR_FILENAME} from './user.constant.js';
 
 @injectable()
 export class UserController extends BaseController {
@@ -21,10 +28,26 @@ export class UserController extends BaseController {
   ) {
     super(logger);
 
-    this.addRoute({path: '/register', method: HttpMethod.Post, handler: this.create});
-    this.addRoute({path: '/login', method: HttpMethod.Post, handler: this.login});
+    const validatorOptions = {whitelist: true, forbidNonWhitelisted: true};
+    this.addRoute({
+      path: '/register',
+      method: HttpMethod.Post,
+      handler: this.create,
+      middlewares: [new ValidateDtoMiddleware(CreateUserDto, validatorOptions)],
+    });
+    this.addRoute({
+      path: '/login',
+      method: HttpMethod.Post,
+      handler: this.login,
+      middlewares: [new ValidateDtoMiddleware(LoginUserDto, validatorOptions)],
+    });
     this.addRoute({path: '/login', method: HttpMethod.Get, handler: this.checkAuth});
-    this.addRoute({path: '/:userId/avatar', method: HttpMethod.Post, handler: this.uploadAvatar});
+    this.addRoute({
+      path: '/:userId/avatar',
+      method: HttpMethod.Post,
+      handler: this.uploadAvatar,
+      middlewares: [new ValidateObjectIdMiddleware('userId'), new UploadAvatarMiddleware()],
+    });
   }
 
   public async create({body}: CreateUserRequest, res: Response): Promise<void> {
@@ -42,7 +65,8 @@ export class UserController extends BaseController {
       );
     }
 
-    const user = await this.userService.create(body, this.config.get('SALT'));
+    const dto = {...body, avatarPath: this.getAvatarUrl(DEFAULT_AVATAR_FILENAME)};
+    const user = await this.userService.create(dto, this.config.get('SALT'));
     this.created(res, fillDTO(UserRdo, user.toObject({virtuals: true})));
   }
 
@@ -60,7 +84,51 @@ export class UserController extends BaseController {
     throw new HttpError(StatusCodes.NOT_IMPLEMENTED, 'Проверка токена будет реализована в разделе авторизации.');
   }
 
-  public uploadAvatar(_req: Request, _res: Response): void {
-    throw new HttpError(StatusCodes.NOT_IMPLEMENTED, 'Загрузка аватара будет реализована в разделе работы с файлами.');
+  public async uploadAvatar(req: Request, res: Response): Promise<void> {
+    const userId = req.params.userId as string;
+    const file = req.file;
+
+    if (!file) {
+      throw new HttpError(StatusCodes.BAD_REQUEST, 'Файл аватара не получен.');
+    }
+
+    if (!await this.userService.findById(userId)) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Пользователь не найден.');
+    }
+
+    const filename = `${randomUUID()}${extname(file.originalname).toLowerCase()}`;
+    const directory = this.config.get('UPLOAD_DIRECTORY');
+    const filePath = join(directory, filename);
+    const avatarPath = this.getAvatarUrl(filename);
+
+    await mkdir(directory, {recursive: true});
+    const handle = await open(filePath, 'wx');
+    let user: Awaited<ReturnType<UserService['updateById']>>;
+
+    try {
+      try {
+        await handle.writeFile(new Uint8Array(file.buffer));
+      } finally {
+        await handle.close();
+      }
+
+      user = await this.userService.updateById(userId, {avatarPath});
+
+      if (!user) {
+        throw new HttpError(StatusCodes.NOT_FOUND, 'Пользователь не найден.');
+      }
+    } catch (error: unknown) {
+      await rm(filePath, {force: true}).catch(() => {
+        this.logger.warn(`Не удалось удалить файл аватара после ошибки: userId=${userId}.`);
+      });
+      throw error;
+    }
+
+    this.ok(res, fillDTO(UserRdo, user.toObject({virtuals: true})));
+  }
+
+  private getAvatarUrl(filename: string): string {
+    const origin = this.config.get('PUBLIC_URL') || `http://localhost:${this.config.get('PORT')}`;
+    return new URL(`${AVATAR_URL_PATH}/${filename}`, origin).href;
   }
 }

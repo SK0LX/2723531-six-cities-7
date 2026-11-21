@@ -25,8 +25,11 @@ export abstract class BaseController implements Controller {
 
   public addRoute(route: Route): void {
     const wrappedHandler = asyncHandler(route.handler.bind(this));
+    const middlewareHandlers = (route.middlewares ?? []).map((middleware) =>
+      asyncHandler(middleware.execute.bind(middleware))
+    );
 
-    this._router[route.method](route.path, wrappedHandler);
+    this._router[route.method](route.path, ...middlewareHandlers, wrappedHandler);
 
     this.logger.info(
       `Маршрут зарегистрирован: ${route.method.toUpperCase()} ${route.path}`,
@@ -50,5 +53,9 @@ export abstract class BaseController implements Controller {
 
   public noContent(res: Response): void {
     res.status(StatusCodes.NO_CONTENT).send();
+  }
+
+  public notFound(res: Response): void {
+    res.status(StatusCodes.NOT_FOUND).send();
   }
 }
