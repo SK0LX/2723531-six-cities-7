@@ -5,3 +5,6 @@ export {HttpError} from './errors/http-error.js';
 export type {ExceptionFilter} from './exception-filter/exception-filter.interface.js';
 export {AppExceptionFilter} from './exception-filter/app-exception-filter.js';
 export {getUserId, requireUserId} from './helpers/request-user.js';
+export type {Middleware} from './middleware/middleware.interface.js';
+export {ValidateObjectIdMiddleware} from './middleware/validate-object-id.middleware.js';
+export {ValidateDtoMiddleware} from './middleware/validate-dto.middleware.js';

@@ -1,47 +1,96 @@
 import {inject, injectable} from 'inversify';
 import {StatusCodes} from 'http-status-codes';
-import {isValidObjectId} from 'mongoose';
 import type {Request, Response} from 'express';
-import {BaseController, HttpError} from '../../libs/rest/index.js';
-import {getUserId, requireUserId} from '../../libs/rest/helpers/request-user.js';
+import {BaseController, HttpError, ValidateDtoMiddleware, ValidateObjectIdMiddleware} from '../../libs/rest/index.js';
+import {getUserId} from '../../libs/rest/helpers/request-user.js';
 import type {Logger} from '../../logger/index.js';
-import {CITIES, Component, HttpMethod} from '../../types/index.js';
 import type {City} from '../../types/index.js';
+import {CITIES, Component, HttpMethod} from '../../types/index.js';
 import {fillDTO} from '../../helpers/index.js';
 import type {OfferService} from './offer-service.interface.js';
 import type {OfferDetails} from './offer-view.type.js';
 import type {CreateOfferRequest} from './create-offer-request.type.js';
+import {CreateOfferDto} from './dto/create-offer.dto.js';
+import {UpdateOfferDto} from './dto/update-offer.dto.js';
 import type {UpdateOfferRequest} from './update-offer-request.type.js';
 import {OfferPreviewRdo} from './rdo/offer-preview.rdo.js';
 import {OfferRdo} from './rdo/offer.rdo.js';
+import {CommentRdo, CommentService} from '../comment/index.js';
+import type {UserService} from '../user/user-service.interface.js';
 
 @injectable()
 export class OfferController extends BaseController {
   constructor(
     @inject(Component.Logger) logger: Logger,
     @inject(Component.OfferService) private readonly offerService: OfferService,
+    @inject(Component.CommentService) private readonly commentService: CommentService,
+    @inject(Component.UserService) private readonly userService: UserService,
   ) {
     super(logger);
 
+    const validateOfferId = new ValidateObjectIdMiddleware('offerId');
+    const validateFavoriteUserId = new ValidateObjectIdMiddleware('userId', 'query');
+
     this.addRoute({path: '/', method: HttpMethod.Get, handler: this.index});
-    this.addRoute({path: '/', method: HttpMethod.Post, handler: this.create});
+    this.addRoute({
+      path: '/',
+      method: HttpMethod.Post,
+      handler: this.create,
+      middlewares: [
+        new ValidateDtoMiddleware(CreateOfferDto),
+        new ValidateObjectIdMiddleware('userId', 'body'),
+      ],
+    });
     this.addRoute({path: '/premium', method: HttpMethod.Get, handler: this.findPremium});
-    this.addRoute({path: '/favorites', method: HttpMethod.Get, handler: this.findFavorites});
-    this.addRoute({path: '/:offerId', method: HttpMethod.Get, handler: this.show});
-    this.addRoute({path: '/:offerId', method: HttpMethod.Patch, handler: this.update});
-    this.addRoute({path: '/:offerId', method: HttpMethod.Delete, handler: this.delete});
-    this.addRoute({path: '/:offerId/favorite', method: HttpMethod.Put, handler: this.addFavorite});
-    this.addRoute({path: '/:offerId/favorite', method: HttpMethod.Delete, handler: this.removeFavorite});
-  }
-
-  private getOfferId(req: Request): string {
-    const offerId = req.params.offerId;
-
-    if (typeof offerId !== 'string' || !isValidObjectId(offerId)) {
-      throw new HttpError(StatusCodes.BAD_REQUEST, 'Некорректный идентификатор предложения.');
-    }
-
-    return offerId;
+    this.addRoute({
+      path: '/favorites',
+      method: HttpMethod.Get,
+      handler: this.findFavorites,
+      middlewares: [validateFavoriteUserId],
+    });
+    this.addRoute({
+      path: '/:offerId',
+      method: HttpMethod.Get,
+      handler: this.show,
+      middlewares: [validateOfferId],
+    });
+    this.addRoute({
+      path: '/:offerId',
+      method: HttpMethod.Patch,
+      handler: this.update,
+      middlewares: [
+        validateOfferId,
+        new ValidateDtoMiddleware(UpdateOfferDto, {
+          skipUndefinedProperties: true,
+          whitelist: true,
+          forbidNonWhitelisted: true,
+        }),
+      ],
+    });
+    this.addRoute({
+      path: '/:offerId',
+      method: HttpMethod.Delete,
+      handler: this.delete,
+      middlewares: [validateOfferId],
+    });
+    this.addRoute({
+      path: '/:offerId/favorite',
+      method: HttpMethod.Put,
+      handler: this.addFavorite,
+      middlewares: [validateFavoriteUserId, validateOfferId],
+    });
+    this.addRoute({
+      path: '/:offerId/favorite',
+      method: HttpMethod.Delete,
+      handler: this.removeFavorite,
+      middlewares: [validateFavoriteUserId, validateOfferId],
+    });
+    this.addRoute({
+      path: '/:offerId/comments',
+      method: HttpMethod.Get,
+      handler: this.getComments,
+      middlewares: [validateOfferId],
+    });
   }
 
   private async getOffer(offerId: string, userId?: string): Promise<OfferDetails> {
@@ -52,12 +101,6 @@ export class OfferController extends BaseController {
     }
 
     return offer;
-  }
-
-  private checkAuthor(offer: OfferDetails, userId: string): void {
-    if (offer.user.id !== userId) {
-      throw new HttpError(StatusCodes.FORBIDDEN, 'Изменять и удалять предложение может только автор.');
-    }
   }
 
   public async index(req: Request, res: Response): Promise<void> {
@@ -73,24 +116,23 @@ export class OfferController extends BaseController {
   }
 
   public async show(req: Request, res: Response): Promise<void> {
-    const offer = await this.getOffer(this.getOfferId(req), getUserId(res));
+    const offer = await this.getOffer(req.params.offerId as string, getUserId(res));
     this.ok(res, fillDTO(OfferRdo, offer));
   }
 
   public async create({body}: CreateOfferRequest, res: Response): Promise<void> {
-    const userId = requireUserId(res);
-    const createdOffer = await this.offerService.create({...body, userId});
-    const offer = await this.getOffer(createdOffer._id.toString(), userId);
+    if (!await this.userService.findById(body.userId)) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Автор предложения не найден.');
+    }
+
+    const createdOffer = await this.offerService.create(body);
+    const offer = await this.getOffer(createdOffer._id.toString());
     this.created(res, fillDTO(OfferRdo, offer));
   }
 
   public async update(req: UpdateOfferRequest, res: Response): Promise<void> {
-    const userId = requireUserId(res);
-    const offerId = this.getOfferId(req);
-    const existingOffer = await this.getOffer(offerId, userId);
-    this.checkAuthor(existingOffer, userId);
-
-    const offer = await this.offerService.updateById(offerId, req.body, userId);
+    const offerId = req.params.offerId as string;
+    const offer = await this.offerService.updateById(offerId, req.body);
 
     if (!offer) {
       throw new HttpError(StatusCodes.NOT_FOUND, 'Предложение не найдено.');
@@ -100,10 +142,7 @@ export class OfferController extends BaseController {
   }
 
   public async delete(req: Request, res: Response): Promise<void> {
-    const userId = requireUserId(res);
-    const offerId = this.getOfferId(req);
-    const offer = await this.getOffer(offerId, userId);
-    this.checkAuthor(offer, userId);
+    const offerId = req.params.offerId as string;
 
     if (!await this.offerService.deleteById(offerId)) {
       throw new HttpError(StatusCodes.NOT_FOUND, 'Предложение не найдено.');
@@ -123,14 +162,14 @@ export class OfferController extends BaseController {
     this.ok(res, fillDTO(OfferPreviewRdo, offers));
   }
 
-  public async findFavorites(_req: Request, res: Response): Promise<void> {
-    const offers = await this.offerService.findFavorites(requireUserId(res));
+  public async findFavorites(req: Request, res: Response): Promise<void> {
+    const offers = await this.offerService.findFavorites(req.query.userId as string);
     this.ok(res, fillDTO(OfferPreviewRdo, offers));
   }
 
   public async addFavorite(req: Request, res: Response): Promise<void> {
-    const userId = requireUserId(res);
-    const offerId = this.getOfferId(req);
+    const userId = req.query.userId as string;
+    const offerId = req.params.offerId as string;
 
     if (!await this.offerService.addToFavorites(offerId, userId)) {
       throw new HttpError(StatusCodes.NOT_FOUND, 'Предложение или пользователь не найден.');
@@ -141,12 +180,22 @@ export class OfferController extends BaseController {
   }
 
   public async removeFavorite(req: Request, res: Response): Promise<void> {
-    const userId = requireUserId(res);
+    const userId = req.query.userId as string;
 
-    if (!await this.offerService.removeFromFavorites(this.getOfferId(req), userId)) {
+    if (!await this.offerService.removeFromFavorites(req.params.offerId as string, userId)) {
       throw new HttpError(StatusCodes.NOT_FOUND, 'Предложение или пользователь не найден.');
     }
 
     this.noContent(res);
+  }
+
+  public async getComments(req: Request, res: Response): Promise<void> {
+    const offerId = req.params.offerId as string;
+    if (!await this.offerService.exists(offerId)) {
+      throw new HttpError(StatusCodes.NOT_FOUND, 'Предложение не найденно');
+    }
+    const comments = await this.commentService.findByOfferId(offerId);
+    const commentObjects = comments.map((comment) => comment.toObject({virtuals: true}));
+    this.ok(res, fillDTO(CommentRdo, commentObjects));
   }
 }

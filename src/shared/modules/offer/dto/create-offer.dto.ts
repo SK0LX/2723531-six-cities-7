@@ -1,18 +1,20 @@
 import type {Amenity, City, Coordinates, HousingType} from '../../../types/index.js';
+import {OfferFieldsDto} from './offer-fields.dto.js';
 
-export class CreateOfferDto {
-  public title!: string;
-  public description!: string;
-  public postDate!: Date;
-  public city!: City;
-  public previewImage!: string;
-  public images!: string[];
-  public isPremium!: boolean;
-  public type!: HousingType;
-  public bedrooms!: number;
-  public maxAdults!: number;
-  public price!: number;
-  public amenities!: Amenity[];
+export class CreateOfferDto extends OfferFieldsDto {
+  declare title: string;
+  declare description: string;
+  declare postDate: Date;
+  declare city: City;
+  declare previewImage: string;
+  declare images: string[];
+  declare isPremium: boolean;
+  declare type: HousingType;
+  declare bedrooms: number;
+  declare maxAdults: number;
+  declare price: number;
+  declare amenities: Amenity[];
+  declare location: Coordinates;
+
   public userId!: string;
-  public location!: Coordinates;
 }
